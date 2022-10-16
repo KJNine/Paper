@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: KJNine <kjnine@kjnine.net>
+Date: Sat, 15 Oct 2022 23:55:18 -0400
+Subject: [PATCH] Add Support for AccurateBlockPlacement Protocol
+
+The AccurateBlockPlacement protocol encodes block-facing information in the UseItemOn Packet, so when placing directional blocks (Stairs, Pistons, Repeaters, etc.) the client can specify which direction it should face, rather than letting the server calculate it based on player rotation.
+
+diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+index 456595e4b7e0c7f50617aa2694b0d2dfc368ab81..a24b69fd7647b43d2c05989ec8d2adcfd2c394c8 100644
+--- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+@@ -142,6 +142,9 @@ public class GlobalConfiguration extends ConfigurationPart {
+         public boolean performUsernameValidation = true;
+         @Comment("This setting controls if players should be able to create headless pistons.")
+         public boolean allowHeadlessPistons = false;
++
++        @Comment("This setting controls whether to use the AccurateBlockPlacement protocol.")
++        public boolean allowAccurateBlockPlacement = true;
+     }
+ 
+     public Commands commands;
+diff --git a/src/main/java/io/papermc/paper/util/BlockPlacementUtil.java b/src/main/java/io/papermc/paper/util/BlockPlacementUtil.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..d35d37ce696b6ffb9b7d653606cb7a58c46ad01c
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/util/BlockPlacementUtil.java
+@@ -0,0 +1,85 @@
++package io.papermc.paper.util;
++
++import net.minecraft.core.BlockPos;
++import net.minecraft.core.Direction;
++import net.minecraft.world.item.context.BlockPlaceContext;
++import net.minecraft.world.level.block.BedBlock;
++import net.minecraft.world.level.block.Block;
++import net.minecraft.world.level.block.ComparatorBlock;
++import net.minecraft.world.level.block.RepeaterBlock;
++import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.block.state.properties.*;
++import net.minecraft.world.phys.Vec3;
++
++import java.util.Optional;
++
++public class BlockPlacementUtil {
++
++    public static BlockState tryAccurateBlockPlacement(Block block, BlockPlaceContext context) {
++        Vec3 clickVec = context.getClickLocation();
++        BlockPos blockPos = context.getClickedPos();
++        double xdiff = clickVec.x - blockPos.getX(); // encoded protocol
++        if(xdiff < 2)
++            return null;
++        BlockState state = block.getStateForPlacement(context); // vanilla state
++        if(state == null)
++            return null;
++
++        int protocol = ((int)xdiff-2) / 2;
++
++        Optional<DirectionProperty> optionalProperty = state.getProperties()
++            .stream()
++            .filter(property -> property instanceof DirectionProperty)
++            .map(property -> ((DirectionProperty)property))
++            .findFirst();
++
++        if(optionalProperty.isPresent()) {
++            DirectionProperty directionProperty = optionalProperty.get();
++            Direction current = state.getValue(directionProperty);
++            Direction direction = current;
++            int directionId = protocol & 0xF;
++            if(directionId == 6) {
++                direction = current.getOpposite();
++            } else if(directionId <= 5) {
++                direction = Direction.values()[directionId];
++            }
++            if(!directionProperty.getPossibleValues().contains(direction)) {
++                if(context.getPlayer() == null) {
++                    return null;
++                }
++                direction = context.getPlayer().getDirection().getOpposite();
++            }
++            if(direction != current && directionProperty.getPossibleValues().contains(direction)) {
++                if (state.getBlock() instanceof BedBlock) {
++                    BlockPos headPos = blockPos.relative(direction);
++                    if (!context.getLevel().getBlockState(headPos).canBeReplaced(context)) {
++                        return null;
++                    }
++                }
++                state = state.setValue(directionProperty, direction);
++            }
++        } else if(state.hasProperty(BlockStateProperties.AXIS)) {
++            state = state.setValue(BlockStateProperties.AXIS, Direction.Axis.VALUES[protocol % 3]);
++        }
++        protocol &= 0xFFFFFFF0;
++
++        if(protocol >= 16) {
++            if(state.getBlock() instanceof RepeaterBlock) {
++                if(RepeaterBlock.DELAY.getPossibleValues().contains(protocol / 16)) {
++                    state = state.setValue(RepeaterBlock.DELAY, protocol / 16);
++                }
++            } else if(protocol == 16) {
++                if(state.getBlock() instanceof ComparatorBlock) {
++                    state = state.setValue(ComparatorBlock.MODE, ComparatorMode.SUBTRACT);
++                } else if(state.hasProperty(BlockStateProperties.HALF) && state.getValue(BlockStateProperties.HALF) == Half.BOTTOM) {
++                    state = state.setValue(BlockStateProperties.HALF, Half.TOP);
++                } else if(state.hasProperty(BlockStateProperties.SLAB_TYPE) && state.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.BOTTOM) {
++                    state = state.setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP);
++                }
++            }
++        }
++
++        return state;
++    }
++
++}
+diff --git a/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 2efb20bf15f766ecb36477ec9739abaa66813dcc..7070b1a1abfe81e89c7488feee99728b95eeeb28 100644
+--- a/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -1954,6 +1954,10 @@ public class ServerGamePacketListenerImpl implements ServerPlayerConnection, Tic
+ 
+         if (this.player.getEyePosition().distanceToSqr(vec3d1) <= ServerGamePacketListenerImpl.MAX_INTERACTION_DISTANCE) {
+             Vec3 vec3d2 = vec3d.subtract(vec3d1);
++            // Paper start
++            if (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowAccurateBlockPlacement)
++                vec3d2 = Vec3.ZERO;
++            // Paper end
+             double d0 = 1.0000001D;
+ 
+             if (Math.abs(vec3d2.x()) < 1.0000001D && Math.abs(vec3d2.y()) < 1.0000001D && Math.abs(vec3d2.z()) < 1.0000001D) {
+diff --git a/src/main/java/net/minecraft/world/item/BlockItem.java b/src/main/java/net/minecraft/world/item/BlockItem.java
+index 62d6c5b7590ff4faef5d8c7a8be03155b7338480..70a51a4e6bedc7bced2c8ae870a0777e5b8ba221 100644
+--- a/src/main/java/net/minecraft/world/item/BlockItem.java
++++ b/src/main/java/net/minecraft/world/item/BlockItem.java
+@@ -156,8 +156,14 @@ public class BlockItem extends Item {
+ 
+     @Nullable
+     protected BlockState getPlacementState(BlockPlaceContext context) {
+-        BlockState iblockdata = this.getBlock().getStateForPlacement(context);
+-
++        // Paper start
++        BlockState iblockdata = io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowAccurateBlockPlacement
++            ? io.papermc.paper.util.BlockPlacementUtil.tryAccurateBlockPlacement(this.getBlock(), context)
++            : null;
++        if (iblockdata == null) {
++            iblockdata = this.getBlock().getStateForPlacement(context);
++        }
++        // Paper end
+         return iblockdata != null && this.canPlace(context, iblockdata) ? iblockdata : null;
+     }
+ 
