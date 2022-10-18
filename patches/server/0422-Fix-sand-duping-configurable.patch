@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Spottedleaf <Spottedleaf@users.noreply.github.com>
+Date: Fri, 12 Jun 2020 13:33:19 -0700
+Subject: [PATCH] Fix sand duping - configurable
+
+If the falling block dies during teleportation (entity#move), then we need
+to detect that by placing a check after the move.
+
+diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+index 84785fed0d85d78c4caf8fabe35c0e89a59240d5..aa289254ac2baf0eabad655369805da2909a16cb 100644
+--- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+@@ -138,6 +138,8 @@ public class GlobalConfiguration extends ConfigurationPart {
+         public boolean allowPermanentBlockBreakExploits = false;
+         @Comment("This setting controls if player should be able to use TNT duplication, but this also allows duplicating carpet, rails and potentially other items")
+         public boolean allowPistonDuplication = false;
++        @Comment("This setting controls if falling block entities can be duplicated through portals.")
++        public boolean allowSandDuplication = false;
+         public boolean performUsernameValidation = true;
+         @Comment("This setting controls if players should be able to create headless pistons.")
+         public boolean allowHeadlessPistons = false;
+diff --git a/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java b/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
+index 108c9ea0eb4a7f381042bfe0203ac40a9c4f27a7..559d9a28e7d488484e68fbe3144a92129d0493f5 100644
+--- a/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
++++ b/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
+@@ -126,6 +126,12 @@ public class FallingBlockEntity extends Entity {
+ 
+     @Override
+     public void tick() {
++        // Paper start - fix sand duping
++        if (this.isRemoved()
++            && !io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowSandDuplication) {
++            return;
++        }
++        // Paper end - fix sand duping
+         if (this.blockState.isAir()) {
+             this.discard();
+         } else {
+@@ -138,6 +144,13 @@ public class FallingBlockEntity extends Entity {
+ 
+             this.move(MoverType.SELF, this.getDeltaMovement());
+ 
++            // Paper start - fix sand duping
++            if (this.isRemoved()
++                && !io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowSandDuplication) {
++                return;
++            }
++            // Paper end - fix sand duping
++
+             // Paper start - Configurable EntityFallingBlock height nerf
+             if (this.level.paperConfig().fixes.fallingBlockHeightNerf.test(v -> this.getY() > v)) {
+                 if (this.dropItem && this.level.getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {

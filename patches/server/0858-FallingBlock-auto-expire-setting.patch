@@ -5,7 +5,7 @@ Subject: [PATCH] FallingBlock auto expire setting
 
 
 diff --git a/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java b/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
-index f6405e862b15b71dbb96215e604610fe5ff59bfc..ef07967b64180c54338b8fb2ba1780adec87f333 100644
+index 559d9a28e7d488484e68fbe3144a92129d0493f5..cb35e9a1f139d0b6c3ac5c2a0e6c27f3541e86d6 100644
 --- a/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
 +++ b/src/main/java/net/minecraft/world/entity/item/FallingBlockEntity.java
 @@ -61,6 +61,7 @@ public class FallingBlockEntity extends Entity {
@@ -16,7 +16,7 @@ index f6405e862b15b71dbb96215e604610fe5ff59bfc..ef07967b64180c54338b8fb2ba1780ad
  
      public FallingBlockEntity(EntityType<? extends FallingBlockEntity> type, Level world) {
          super(type, world);
-@@ -175,7 +176,7 @@ public class FallingBlockEntity extends Entity {
+@@ -177,7 +178,7 @@ public class FallingBlockEntity extends Entity {
                  }
  
                  if (!this.onGround && !flag1) {
@@ -25,7 +25,7 @@ index f6405e862b15b71dbb96215e604610fe5ff59bfc..ef07967b64180c54338b8fb2ba1780ad
                          if (this.dropItem && this.level.getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
                              this.spawnAtLocation((ItemLike) block);
                          }
-@@ -321,6 +322,7 @@ public class FallingBlockEntity extends Entity {
+@@ -323,6 +324,7 @@ public class FallingBlockEntity extends Entity {
          if (this.blockData != null) {
              nbt.put("TileEntityData", this.blockData);
          }
@@ -33,7 +33,7 @@ index f6405e862b15b71dbb96215e604610fe5ff59bfc..ef07967b64180c54338b8fb2ba1780ad
  
      }
  
-@@ -367,6 +369,10 @@ public class FallingBlockEntity extends Entity {
+@@ -369,6 +371,10 @@ public class FallingBlockEntity extends Entity {
              int srcZ = nbt.getInt("SourceLoc_z");
              this.setOrigin(new org.bukkit.Location(level.getWorld(), srcX, srcY, srcZ));
          }
